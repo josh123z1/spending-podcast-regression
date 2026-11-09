@@ -1,0 +1,562 @@
+---
+title: 'Household Food Spending and Podcast Listens: Regression in R'
+author: 'Joshua'
+output:
+  github_document:
+    toc: yes
+    toc_depth: 3
+  html_document:
+    toc: yes
+    toc_depth: 3
+---
+
+```{r setup, message=FALSE}
+knitr::opts_chunk$set(message = FALSE)
+library(tidyverse)
+library(Hmisc)
+library(emmeans)
+library(car)
+library(gridExtra)
+library(grid)
+```
+
+---
+
+
+
+
+
+---
+
+#  Question 1
+
+## Data Loading and cleaning
+
+```{r}
+# Loading household_expenditure.csv and saving it as a tibble with its name as house
+
+house <- read_csv("data/household_expenditure.csv")
+```
+
+
+The data dictionary of the loaded household_expenditure.csv file
+
+
+
+Variable        | Description                                                                 
+----------------|---------------------------------
+Kids            | Number of kids in the household
+HouseholdSize   | Number of people in Household
+Sex             | Gender of the survey respondent
+Vehicles        | Number of vehicles in the household
+Food            | Average food expenditure per week
+Housing         | Average amount spent on accommodation per week
+Alcohol         | Average alcohol expenditure per week
+Debt            | Average amount spent on debt payment per week
+income_category | Income category of the household
+
+```{r}
+# Checking the summary of the house tibble
+
+summary(house)
+```
+The given dataset has about 4097 records. Upon checking the summary of the house tibble. It is seen that Kids, HouseholdSize and Debt columns have 6, 6 and 8 NA values recorded respectively. Some records are missing more than one of these, so removing them drops 14 records, which reduces the records to 4083.
+
+```{r}
+house_clean <- house %>%
+  filter(!is.na(Kids), !is.na(HouseholdSize), !is.na(Debt))
+
+summary(house_clean)
+```
+```{r}
+# Checking the uniqueness of the data to see if there are case errors or misspellings
+
+unique(house_clean$Sex)
+unique(house_clean$income_category)
+```
+
+There are no issues in Sex and income_category variables.
+
+```{r}
+# Converting Sex and income_category to categorical data
+
+house_clean <- house_clean %>%
+  mutate(Sex=factor(Sex),
+         income_category=factor(income_category, c('Low', 'Medium', 'High')))
+         
+```
+
+## Variable visualisations
+
+The distribution of each variables is checked, along with its mean to check out if there are any huge outliers. 
+
+```{r}
+mean_data <- house_clean %>%
+  group_by(income_category) %>%
+  summarise(food_mean = mean(Food),
+            housing_mean = mean(Housing),
+            alcohol_mean = mean(Alcohol),
+            debt_mean = mean(Debt))
+```
+
+
+```{r}
+# Plotting frequency distribution of kids
+
+ggplot(house_clean, aes(factor(Kids))) + 
+  geom_bar(color='black', alpha=0.4)+
+  facet_wrap(income_category~.) +
+  labs(y="Frequency", x="Number of Kids", title = "Fig 1:-Frequency distribution of number of kids across income category")
+
+```
+
+In figure 1, it can be seen that regardless of income category, most households have 0 kids.
+
+```{r}
+# Plotting frequency distribution of household size
+
+ggplot(house_clean, aes(factor(HouseholdSize))) + 
+  geom_bar(color='black', alpha=0.4)+
+  facet_wrap(income_category~.) +
+  labs(y="Frequency", x="Household Size", title = "Fig 2:-Frequency distribution of Household size across income category")
+```
+
+In figure 2,most households with low income have 1-2 people living, in medium income household it is 1-3 people living and in large income household 2-3 people are living.
+
+```{r}
+# Plotting frequency distribution of number of vehicles
+
+ggplot(house_clean, aes(factor(Vehicles))) + 
+  geom_bar(color='black', alpha=0.4)+
+  facet_wrap(income_category~.) +
+  labs(y="Frequency", x="Number of Vehicles", title = "Fig 3:-Frequency distribution of number of vehicles across income category")
+```
+
+In figure 3, it can be seen that regardless of income category, most households have 0-2 vehicles.
+
+
+```{r}
+# Plotting frequency distribution of food expenditure
+
+ggplot(house_clean, aes(Food)) + 
+  geom_histogram(color='black', alpha=0.4) +
+  facet_wrap(income_category~.) +
+  geom_vline(data = mean_data, aes(xintercept = food_mean, linetype = "Mean"), color='red') + 
+  scale_linetype_manual(
+    name = 'Statistics', 
+    values = c("Mean" = "dashed")
+  ) +
+  labs(y="Frequency", x="Food Expenditure (£)", title = "Fig 4:-Frequency distribution of Food Expenditure across income category")
+```
+
+In figure 4, it can be seen that regardless of income, most households spend around 50-75 pounds on food per week.
+
+```{r}
+# Plotting frequency distribution of housing
+
+ggplot(house_clean, aes(Housing)) + 
+  geom_histogram(color='black', alpha=0.4)+
+  facet_wrap(income_category~.) + 
+  geom_vline(data = mean_data, aes(xintercept = housing_mean, linetype = "Mean"), color='red') + 
+  scale_linetype_manual(
+    name = 'Statistics', 
+    values = c("Mean" = "dashed")
+  ) +
+  labs(y="Frequency", x="Housing Expenditure (£)", title = "Fig 5:-Frequency distribution of Housing Expenditure across income category")
+```
+
+In figure 5, it can be seen that regardless income, most households spend around 250-350 pounds per week on housing. Some households in low and medium income have outlier households with spending over 600 pounds on housing.These records are not removed as it is not too far from mean and does not change the distribution.
+
+```{r}
+# Plotting frequency distribution of alcohol 
+
+ggplot(house_clean, aes(Alcohol)) + 
+  geom_histogram(color='black', alpha=0.4)+
+  facet_wrap(income_category~.) + 
+  geom_vline(data = mean_data, aes(xintercept = alcohol_mean, linetype = "Mean"), color='red') + 
+  scale_linetype_manual(
+    name = 'Statistics', 
+    values = c("Mean" = "dashed")
+  ) +
+  labs(y="Frequency", x="Alcohol Expenditure (£)", title = "Fig 6:- Frequency distribution of Alcohol Expenditure across income category")
+```
+
+In figure 6, On average, the households spend around 15-20 pounds on alcohol.
+
+```{r}
+ggplot(house_clean, aes(Debt)) + 
+  geom_histogram(color='black', alpha=0.4)+
+  facet_wrap(income_category~.) + 
+  geom_vline(data = mean_data, aes(xintercept = debt_mean, linetype = "Mean"), color='red') + 
+  scale_linetype_manual(
+    name = 'Statistics', 
+    values = c("Mean" = "dashed")
+  ) +
+  labs(y="Frequency", x="Debt Payment (£)", title = "Fig 7:- Frequency distribution of Debt payment across income category")
+```
+
+In figure 7, most households spend around 40-75 pounds per week paying back their debts. Significant amount of households do not have debt payments, which could mean do not have much debts to pay back, so they are not removed.
+
+## Statistical testing
+
+The correlation is calculated for each variable to see if there are any highly correlated data. If there are, it would lead to multicollinearity.
+
+```{r}
+# Calculating the correlation between variables
+
+rcorr(as.matrix(select_if(house_clean, is.numeric)))
+```
+
+
+Most data do not have high correlation with each other except for Kids and HouseholdSize. This is expected since household size will include kids also.
+
+### Effect of variables upon food expenditure
+
+To examine the effects of the number of kids, household size, income category, alcohol expenditure, debt payment, housing payment and number of vehicles on food expenditure, a multiple linear regression model is fitted with these variables. Sex variable is not considered in this and further analysis because it is the gender of the survey respondent. The gender of the respondent does not normally change expenditure of household, the size and number of vehicles. Kids is also removed, since it is highly corelated with household size. 
+
+```{r}
+m.food <- lm(Food~ HouseholdSize+income_category+ Alcohol+ Debt+ Housing+Vehicles, data = house_clean)
+summary(m.food)
+```
+
+```{r}
+cbind(coef(m.food),confint(m.food))
+```
+
+Upon running the model, it is seen that  Alcohol, Housing and debt have very high significance effect on food expenditure. 
+
+The housing expenditure is the most significant, showing that with a pound extra spent on housing, the food expenditure will increase by 0.09 pounds ($b = 0.09$, CI = [0.08, 0.09], $t(4075)=26.25$, $p<0.001$). While with 1 pound extra spent on alcohol will food expenditure by 0.38 pounds ($b = 0.38$, CI = [0.26, 0.51], $t(4075)=6.23$, $p<0.001$) and with 1 pound extra spent on debt payment, will decrease the food expenditure by 0.05 pounds ($b = -0.05$, CI = [-0.06, -0.03], $t(4075)=-5.05$, $p<0.001$).
+
+The household size and number of vehicles are not a significant predictor for food expenditure. But in income category, the households with medium category income is shown to be marginally significant with 1.04 pounds increase in food expenditure compared to low income category households ($b = 1.05$, CI = [0.15, 1.95], $t(4075)=2.28$, $p=0.023$) but households with high income category is not shown to be significantly different from low income households.
+
+### Effects of alcohol and whether the effect is the same across households with different debt payments
+
+The interaction effect of Alcohol and Debt with effects of other variables on food expenditure is examined using linear regression model
+
+```{r}
+m.food.int <- lm(Food~ HouseholdSize+income_category+Alcohol*Debt+ Housing+Vehicles , data = house_clean)
+summary(m.food.int)
+``` 
+
+```{r}
+vif(m.food.int)
+```
+
+The VIF scores of Debt and Alcohol variables are very high, despite having very less correlation. This is a structural multicollinearity. To combat this alcohol and debt is normalised.
+
+```{r}
+house_clean <- house_clean %>%
+  mutate(nAlcohol=Alcohol-mean(Alcohol),
+         nDebt=Debt-mean(Debt))
+
+m.food.int <- lm(Food~ HouseholdSize+income_category+nAlcohol*nDebt+ Housing+Vehicles , data = house_clean)
+summary(m.food.int)
+
+
+```
+
+```{r}
+vif(m.food.int)
+```
+The VIF scores low, so the model is good.
+
+```{r}
+cbind(coef(m.food.int),confint(m.food.int))
+```
+
+Upon seeing the interactions between alcohol expenditure and debt payments and effects of other variables on food expenditure, it is shown that the interaction is not significant ($b = -0.0015$, CI = [-0.008, 0.005], $t(4074)=-0.49$, $p=0.62$) . This indicates that the effect of alcohol expenditure on food expenditure does not significantly differ across different debt payment levels.
+
+
+
+Now, the interaction effect of alcohol expenditure and debt payment on food expenditure without the effects of other variables, to see if significance changes without other variables.
+
+```{r}
+m.food.int2 <- lm(Food~ nAlcohol*nDebt , data = house_clean)
+summary(m.food.int2)
+```
+```{r}
+cbind(coef(m.food.int2),confint(m.food.int2))
+```
+
+The significance of the interaction in this model has increased ($b = -0.003$, CI = [-0.010, 0.003], $t(4079)=-0.92$, $p=0.36$) compared to previous model, but it still doesn't reject the null hypothesis. On the surface this model might be better but the F-statistic score is much lower. 
+
+The anova model is now used to see which model is better.
+
+```{r}
+anova(m.food.int, m.food.int2)
+```
+
+The result of the anova model is very significant and it shows Model 1, which includes other variables, fits much better compared to Model 2 with just interaction effect between alcohol and debt variables ($F(5,4074)=140.24$, $p<0.001$). This shows that we cannot ignore other variables like housing expenditure, to gain understanding of food expenditure even if we are just seeing interaction effect of the said variables.
+
+
+
+---
+
+# Question 2
+
+## Data Loading and cleaning
+
+```{r}
+# Loading the podcast_listens.csv and saving it as a tibble with its name as podcast
+
+podcast <- read_csv("data/podcast_listens.csv")
+```
+
+
+The data dictionary of the loaded podcast_listens.csv file.
+
+
+
+Variable            | Description                                                                 
+--------------------|---------------------------------
+Platform            | The platform where the podcast is being streamed
+genre               | Genre of podcast
+avg.review          | Average review rating of the podcast
+daily.listens       |  Average daily listens
+total.reviews       | Number of reviews the podcast has
+subscribers         | Subscriber count of the podcast
+
+```{r}
+# Checking the summary of the podcast tibble
+
+summary(podcast)
+```
+The podcast dataset has about 5400 records of data. From the summary, it is seen that the subscribers data has records which have less than 0 subscribers and is in decimals. This is not possible since this is not average and total count cannot be less than zero. It is also seen that avg.review has readings with 100, while majority of data are less than 5 as we can see from quartiles. This means the rating score is out of 5. 
+
+So the subscribers less than 0 and avg.reviews over 5 are removed. Also the subscribers are rounded and Platform and genre are made into categorical.
+
+
+```{r}
+podcast_clean <- podcast %>%
+  mutate(subscribers=round(subscribers),
+         Platform=factor(Platform),
+         genre=factor(genre, c("Documentary","Comedy","News & Culture"))) %>%
+  filter(subscribers>=0) %>% 
+  filter(avg.review<=5) 
+
+summary(podcast_clean)
+```
+
+
+## Variable visualisations
+
+The distribution of each variables are checked, along with its mean to check out any huge outliers. 
+
+```{r}
+# Checking the uniqueness of the data to see there are case errors or misspellings
+
+unique(podcast_clean$Platform)
+
+unique(podcast_clean$genre)
+```
+
+There are no issues in platform and genre columns
+
+
+```{r}
+#calculating the mean for the plots
+
+mean_pod_data <- podcast_clean  %>%
+  summarise(avgreview_mean = mean(avg.review),
+            listens_mean = mean(daily.listens),
+            totreview_mean = mean(total.reviews),
+            subs_mean = mean(subscribers))
+```
+
+```{r}
+# Plotting frequency distribution of average review
+
+ggplot(podcast_clean, aes(avg.review))+
+  geom_histogram( bins=30, color='black', alpha=0.4) +  
+  geom_vline(data = mean_pod_data, aes(xintercept = avgreview_mean, linetype = "Mean"), color='red') + 
+  scale_linetype_manual(
+    name = 'Statistics', 
+    values = c("Mean" = "dashed")
+  )+
+  labs(y="Frequency", x="Average review rating", title = "Fig 8:- Frequency distribution of Average review rating ")
+```
+
+
+In figure 8, it can be seen that on average, the review ratings of podcast is around 4.3. There are also couple of podcast with zero score. On the surface, this is not an issue, but will be investigated further latter.
+
+
+
+
+```{r}
+# Plotting frequency distribution of daily listens
+
+ggplot(podcast_clean, aes(daily.listens))+
+  geom_histogram(color='black', alpha=0.4, bins=40) + 
+  geom_vline(data = mean_pod_data, aes(xintercept = listens_mean, linetype = "Mean"), color='red') + 
+  scale_linetype_manual(
+    name = 'Statistics', 
+    values = c("Mean" = "dashed")
+  ) +
+  labs(y="Frequency", x="Average daily listens", title = "Fig 9:-Frequency distribution of average daily listens")
+```
+
+In figure 9, it can be seen that on average, the daily listens of podcast is around 4500.
+
+
+```{r}
+# Plotting frequency distribution of total reviews
+
+ggplot(podcast_clean, aes(total.reviews))+
+  geom_histogram(color='black', alpha=0.4) +
+  geom_vline(data = mean_pod_data, aes(xintercept = totreview_mean, linetype = "Mean"), color='red') + 
+  scale_linetype_manual(
+    name = 'Statistics', 
+    values = c("Mean" = "dashed")
+  ) +
+  labs(y="Frequency", x="Total Reviews", title = "Fig 10:-Frequency distribution of total review")
+```
+
+In figure 10, on average a podcast has about 900 reviews. It is also seen that there is a significant outlier for podcast with no reviews. This will be investigated further later on along with avg.reviews.
+
+
+
+```{r}
+# Plotting frequency distribution of total subscribers
+
+ggplot(podcast_clean, aes(subscribers))+
+  geom_histogram(color='black', alpha=0.4) +
+  geom_vline(data = mean_pod_data, aes(xintercept = subs_mean, linetype = "Mean"), color='red') + 
+  scale_linetype_manual(
+    name = 'Statistics', 
+    values = c("Mean" = "dashed")
+  ) + 
+  labs(y="Frequency", x="Total Subscribers", title = "Fig 11:- Frequency distribution of Total Subscribers ")
+```
+
+In figure 11, on average, a podcast has around 600 subscribers.
+
+```{r}
+# Plotting average review vs total reviews
+
+ggplot(podcast_clean, aes(total.reviews, avg.review)) +  geom_point() + 
+  labs(y="Average Review Score", x="Total Reviews", title = "Fig 12:- Average Review Score vs Number of Reviews")
+```
+
+In Figure 12, it is seen that podcast with 0 reviews and score is huge outlier. These podcast will be removed only in upcoming analysis on effect of average review score and total reviews on daily listens and not on other analysis, because it still contains other important information.
+
+## Statistical testing
+
+The correlation is calculated for each variable to see if there are any highly correlated data. If there are, it would lead to multicollinearity.
+
+```{r}
+rcorr(as.matrix(select_if(podcast_clean, is.numeric)))
+```
+There is very little correlation each variable. And the correlations of avg.review and subscribers and daily.listens and avg.review correlation very close to zero. Which means they have almost no relation with each other.
+
+### Do podcasts have more/fewer listens depending upon their average review scores and total number of reviews.
+
+To examine the effects of average review and total reviews on daily listens, a multiple linear regression model is fitted with these variables. As stated above, the records with 0 total reviews and average reviews are filtered out, as it is a huge outlier.
+
+
+```{r}
+podcast.new <- podcast_clean%>% 
+  filter(total.reviews>0) %>%
+  filter(avg.review>0)
+
+
+m.listen <- lm(daily.listens~avg.review + total.reviews, data=podcast.new)
+
+summary(m.listen)
+```
+
+
+
+```{r}
+cbind(coef(m.listen),confint(m.listen))
+```
+On running the multiple regression model on average review score and total reviews, it is seen that total reviews of the podcast is shown to have significant effect on average daily listens, with a unit increase in total reviews will increase the listens by 0.21 per day ($b = 0.21$, CI = [0.18, 0.24], $t(5350)=13.16$, $p<0.001$).
+
+Whereas, average review score is not have a significant effect on daily listens, which indicates that review scores doesn't significantly change daily listens. This relation can also be seen in correlation matrix, which is very close to zero.
+
+### Contrast the effect of listens across different genres.
+
+
+To see daily listens on each genre, a linear regression model with them.
+```{r}
+m.listen.genre <- lm(daily.listens~genre, data=podcast_clean)
+summary(m.listen.genre)
+```
+
+```{r}
+cbind(coef(m.listen.genre),confint(m.listen.genre))
+```
+
+
+Here the documentary genre is used as reference category for the model.
+
+From the regression output, it can be seen that Comedy has on average 351 more views than Documentary ($b = 351$, CI = [342.60, 359.16], $t(5373)=83.04$, $p<0.001$), while News and Culture genre has on average has 150 more views than Documentary ($b = 149.76$, CI = [141.48, 158.05], $t(5373)=35.44$, $p<0.001$).
+
+```{r}
+(m.listen.genre.emm <- emmeans(m.listen.genre, ~genre))
+```
+
+```{r}
+(  m.listen.genre.pairs <- confint(pairs(m.listen.genre.emm))  )
+```
+
+
+
+```{r, fig.width=12}
+emm_pod <- ggplot(summary(m.listen.genre.emm), aes(x=genre,y=emmean,ymin=lower.CL, ymax=upper.CL)) + geom_linerange(linewidth=1) + geom_point(color="red") + labs(x="Genre", y="Daily Listens", title="Average daily listens across Genre ",subtitle="Error bars are 95% CIs")
+
+cont_pod <- ggplot(m.listen.genre.pairs, aes(x=contrast, y=estimate, ymin=lower.CL, ymax=upper.CL)) + geom_linerange(linewidth=1) + geom_point(color="red") + labs(x="Contrasts", y="Difference in Daily Listens", title="Contrasts of daily listens across Genre ",subtitle="Error bars are 95% CIs")
+
+grid.arrange(emm_pod, cont_pod, ncol=2, top = textGrob("Fig13:-Average and contrasts of daily listens across genre"))
+```
+
+The left plot of Figure 13 shows the mean daily listens for each genre. Comedy has the most daily listens, followed by News&Culture. The documentary genre has the lowest listens. The right plot shows the estimated differences in daily listens for each sets of genre. 
+
+### What is the effect of subscribers upon the number of listens, and is this different across genres?
+
+To examine the effects of subscribers on the number of listens for each genre, a multiple linear regression model is fitted with the interaction of subscribers and genre.
+
+
+```{r}
+m.subscribers <- lm(daily.listens~subscribers*genre, data=podcast_clean)
+summary(m.subscribers)
+
+```
+
+```{r}
+vif(m.subscribers)
+```
+The VIF scores of subscribers is very high when interacting with genre, despite having very less correlation. This is a structural multicollinearity. To combat this subscribers is normalised.
+
+
+```{r}
+podcast_clean <- podcast_clean %>%
+  mutate(nsubscribers=subscribers-mean(subscribers))
+
+m.subscribers <- lm(daily.listens~nsubscribers*genre, data=podcast_clean)
+summary(m.subscribers)
+```
+
+```{r}
+vif(m.subscribers)
+```
+The VIF score is less than 10, which is good now.
+
+
+```{r}
+cbind(coef(m.subscribers),confint(m.subscribers))
+```
+
+The total subscribers have a significant positive effect on daily listens, with every new subscriber there will be 0.24 increase daily listens when seeing baseline documentary category ($b = 0.24$, CI = [0.2, 0.29], $t(5370)=11.28$, $p<0.001$).
+
+The model also shows that there is significant change in listens when comparing with other genres. For comedy genre, for every new subscriber there will be 0.32 increase in daily listens (0.08 increase from documentary genre) ($b = 0.08$, CI = [0.02, 0.14], $t(5370)=2.53$, $p=0.012$). Whereas for News&Culture genre, for every new subscriber, there will be 0.38 increase in daily listens ($b = 0.13$, CI = [0.07, 0.19], $t(5370)=4.362$, $p<0.001$).
+
+The effects of subscribers on daily listens for each genre can be seen in below figure.
+
+```{r}
+ggplot(podcast_clean, aes(x=subscribers, y=daily.listens, colour = genre)) +  geom_smooth(method = lm, se=FALSE) + 
+  labs(y="Daily Listens", x="Total Subscribers", title = "Fig 14:- Daily Listens vs Subscribers for each genre")
+```
+
+In figure 14, it can be seen that there is positive relation between susbcribers and daily listens for all 3 genres.The comedy genre is the most popular, with having more daily listens for the same amount if subscribers compared to other genre. At 500 subscribers, the comedy genre gets around 4700 daily listens, News & Culture gets around 4500 daily listens, and Documentary gets around 4300 daily listens. Since each extra subscriber adds more listens for News & Culture than for Comedy, News & Culture could eventually catch up with Comedy at very high subscriber counts, although this would be extrapolating beyond the data.
+
+---
